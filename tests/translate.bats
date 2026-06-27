@@ -14,10 +14,13 @@
     fake_bin="$(mktemp -d)"
     fixture="${repo_root}/tests/fixtures/db.json"
 
-    # stub: container echoes its args to stdout (captured by bats in $output)
+    # stub: container echoes args; inspect returns running (needed by waitForRunning)
     cat > "${fake_bin}/container" <<'STUB'
 #!/bin/sh
-echo "$*"
+case "$1" in
+  inspect) printf '[{"status":{"state":"running"}}]' ;;
+  *)       echo "$*" ;;
+esac
 exit 0
 STUB
     chmod +x "${fake_bin}/container"
@@ -38,6 +41,7 @@ STUB
     run env WARDEN_DIR="${repo_root}" \
         WARDEN_ENV_PATH="/tmp" \
         WARDEN_ENV_NAME="testenv" \
+        WARDEN_POLL_INTERVAL_S=0 \
         PATH="${fake_bin}:${PATH}" bash -c "
         source '${repo_root}/utils/core.sh'
         source '${repo_root}/utils/orchestrate.sh'

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 [[ ! ${WARDEN_DIR} ]] && >&2 echo -e "\033[31mThis script is not intended to be run directly!\033[0m" && exit 1
 
+# ponytail: module-level constants; override via env before sourcing in tests
+WARDEN_POLL_INTERVAL_S="${WARDEN_POLL_INTERVAL_S:-2}"
+WARDEN_POLL_MAX_RETRIES="${WARDEN_POLL_MAX_RETRIES:-30}"
+
 ## translateService: given resolved-config JSON and a service name, build and
 ## execute a `container run` invocation.
 ##
@@ -66,9 +70,102 @@ function translateService {
     container run --detach "${argv[@]}" "$image" "${extra[@]+"${extra[@]}"}"
 }
 
+## topoSortServices: emit service names in topological start order from depends_on.
+## Input: resolved-config JSON (from docker compose config --format json).
+## Output: one service name per line; db before php-fpm before nginx for the core stack.
+## A dependency cycle → fatal.
+##
+## ponytail: Kahn's algorithm; O(n²) index scan is fine — service count < 20.
+##   Bash 3.2 compatible (no associative arrays).
+function topoSortServices {
+    local compose_json="$1"
+
+    # Extract service names (jq returns alphabetical order; constraints determine real order)
+    local -a svcs=()
+    while IFS= read -r s; do
+        [[ -n "$s" ]] && svcs+=("$s")
+    done < <(jq -r '.services | keys[]' <<< "$compose_json")
+
+    local n="${#svcs[@]}"
+
+    # indegree[i] = number of unresolved dependencies for svcs[i]
+    # adj[i]      = space-separated indices of services that depend on svcs[i]
+    local -a indegree=() adj=()
+    local i j
+    for (( i=0; i<n; i++ )); do
+        indegree[i]=0
+        adj[i]=""
+    done
+
+    for (( i=0; i<n; i++ )); do
+        while IFS= read -r dep; do
+            [[ -z "$dep" ]] && continue
+            # linear scan to find dep's index (n is small)
+            for (( j=0; j<n; j++ )); do
+                if [[ "${svcs[j]}" == "$dep" ]]; then
+                    indegree[i]=$(( indegree[i] + 1 ))
+                    adj[j]="${adj[j]} ${i}"
+                    break
+                fi
+            done
+        done < <(jq -r --arg s "${svcs[i]}" \
+            '.services[$s].depends_on // {} | keys[]' <<< "$compose_json")
+    done
+
+    # Kahn's algorithm: queue of zero-indegree node indices
+    local -a queue=() result=()
+    for (( i=0; i<n; i++ )); do
+        [[ "${indegree[i]}" -eq 0 ]] && queue+=("$i")
+    done
+
+    while [[ "${#queue[@]}" -gt 0 ]]; do
+        local idx="${queue[0]}"
+        queue=("${queue[@]:1}")
+        result+=("${svcs[idx]}")
+        # shellcheck disable=SC2206
+        local -a nxs=( ${adj[idx]:-} )
+        local nx
+        for nx in "${nxs[@]+"${nxs[@]}"}"; do
+            [[ -z "$nx" ]] && continue
+            indegree[nx]=$(( indegree[nx] - 1 ))
+            [[ "${indegree[nx]}" -eq 0 ]] && queue+=("$nx")
+        done
+    done
+
+    if [[ "${#result[@]}" -ne "${n}" ]]; then
+        fatal "dependency cycle detected in service graph"
+    fi
+
+    printf '%s\n' "${result[@]}"
+}
+
+## waitForRunning: poll `container inspect <name>` until .[0].status.state == "running".
+## Constants WARDEN_POLL_INTERVAL_S and WARDEN_POLL_MAX_RETRIES may be overridden
+## (set them before sourcing this file in tests).
+## On timeout → fatal with container name and retry count.
+##
+## Real shape verified on apple/container 1.0.0:
+##   container inspect <name> → JSON array; running state at .[0].status.state
+function waitForRunning {
+    local name="$1"
+    local attempt=0
+    local state
+
+    while [[ "${attempt}" -lt "${WARDEN_POLL_MAX_RETRIES}" ]]; do
+        state="$(container inspect "${name}" 2>/dev/null | jq -r '.[0].status.state // empty')"
+        if [[ "${state}" == "running" ]]; then
+            return 0
+        fi
+        attempt=$(( attempt + 1 ))
+        sleep "${WARDEN_POLL_INTERVAL_S}"
+    done
+
+    fatal "container '${name}' did not reach running state after ${WARDEN_POLL_MAX_RETRIES} retries"
+}
+
 ## orchestrateEnvUp: render the assembled DOCKER_COMPOSE_ARGS partial list to flat
 ## JSON via docker compose config, pre-create named volumes, then translate+run each
-## service via translateService.
+## service in topological order, waiting for each to reach running state.
 ##
 ## Deps (must be in scope when called from env.cmd):
 ##   DOCKER_COMPOSE_ARGS  — assembled -f <file> array
@@ -92,8 +189,10 @@ function orchestrateEnvUp {
         [[ -n "$volname" ]] && container volume create "${volname}" 2>/dev/null || true
     done < <(jq -r '.volumes // {} | keys[]' <<< "$compose_json" 2>/dev/null || true)
 
-    # Translate and run each service (ordering: PRD-1.3+; any order for this slice)
+    # Start services in topological order; wait for each before proceeding to the next
     while IFS= read -r svc; do
-        [[ -n "$svc" ]] && translateService "$compose_json" "$svc"
-    done < <(jq -r '.services | keys[]' <<< "$compose_json" 2>/dev/null || true)
+        [[ -z "$svc" ]] && continue
+        translateService "$compose_json" "$svc"
+        waitForRunning "${WARDEN_ENV_NAME}-${svc}"
+    done < <(topoSortServices "$compose_json")
 }
