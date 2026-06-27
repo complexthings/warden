@@ -19,24 +19,33 @@ export readonly DOCKER_COMPOSE_COMMAND="${DOCKER_COMPOSE_COMMAND:-"docker compos
 source "${WARDEN_DIR}/utils/core.sh"
 source "${WARDEN_DIR}/utils/svc.sh"
 source "${WARDEN_DIR}/utils/env.sh"
+source "${WARDEN_DIR}/utils/runtime.sh"
 
-## verify docker is installed
-if ! which docker >/dev/null; then
-  fatal "docker could not be found; please install and try again."
-fi
-
-## verify docker compose meets version constraint
-if [[ "${DOCKER_COMPOSE_COMMAND}" == "docker compose" ]]; then
-  # Disable version check for experimental stuff
-  DOCKER_COMPOSE_REQUIRE="2.2.3"
-  DOCKER_COMPOSE_VERSION="$(${DOCKER_COMPOSE_COMMAND} version | grep -oE '[0-9\.]+' | head -n1)"
-  if ! test $(version ${DOCKER_COMPOSE_VERSION}) -ge $(version ${DOCKER_COMPOSE_REQUIRE}); then
-    fatal "docker compose version should be ${DOCKER_COMPOSE_REQUIRE} or higher (${DOCKER_COMPOSE_VERSION} installed)"
-  fi
-fi
-
-## define and export global shared directory paths
+## define WARDEN_HOME_DIR early — needed to read global .env for runtime resolution
 export readonly WARDEN_HOME_DIR="${WARDEN_HOME_DIR:-"$HOME/.warden"}"
+
+# Resolve WARDEN_CONTAINER_RUNTIME with three-level precedence:
+#   1. shell-exported value (WARDEN_CONTAINER_RUNTIME=x warden ...)   ← wins
+#   2. project .env  (nearest ancestor dir containing WARDEN_ENV_NAME)
+#   3. global ~/.warden/.env
+#   4. built-in default: docker
+# Capture shell-exported value before any file loads so we can honour it
+_warden_runtime_shell="${WARDEN_CONTAINER_RUNTIME:-}"
+if [[ -z "${_warden_runtime_shell}" ]]; then
+  unset WARDEN_CONTAINER_RUNTIME
+  _warden_env_early="$(locateEnvPath 2>/dev/null)" || true
+  resolveRuntimeFromFiles "${WARDEN_HOME_DIR}" "${_warden_env_early:-}"
+  unset _warden_env_early
+fi
+unset _warden_runtime_shell
+
+WARDEN_CONTAINER_RUNTIME="$(resolveContainerRuntime)"
+export WARDEN_CONTAINER_RUNTIME
+
+assertRuntimeInstalled
+assertRuntimeVersion
+
+## define and export remaining global shared directory paths
 export readonly WARDEN_SSL_DIR="${WARDEN_HOME_DIR}/ssl"
 export readonly WARDEN_COMPOSER_DIR="${WARDEN_COMPOSER_DIR:-"$HOME/.composer"}"
 
@@ -108,6 +117,10 @@ if [[ ${WARDEN_HELP} ]]; then
   source "${WARDEN_DIR}/commands/usage.cmd"
 fi
 
+## guard unported commands on the container runtime; skip on the help path
+if [[ -n "${WARDEN_CMD_VERB}" && ! "${WARDEN_HELP}" ]]; then
+  assertCommandSupportedForRuntime "${WARDEN_CMD_VERB}"
+fi
 
 ## execute sub-command in context of this script
 source "${WARDEN_CMD_EXEC}"
