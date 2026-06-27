@@ -1,0 +1,37 @@
+{
+  "services": {
+    "db": {
+      "image": "docker.io/wardenenv/mariadb:10.6",
+      "hostname": "testenv-mariadb",
+      "environment": {"MYSQL_ROOT_PASSWORD": "app"},
+      "volumes": [
+        {"type": "volume", "source": "dbdata", "target": "/var/lib/mysql"}
+      ]
+    },
+    "php-fpm": {
+      "image": "docker.io/wardenenv/php-fpm:8.1",
+      "hostname": "testenv-php-fpm",
+      "environment": ["SSH_AUTH_SOCK=/run/host-services/ssh-auth.sock"],
+      "volumes": [
+        {"type": "bind", "source": "/run/host-services/ssh-auth.sock", "target": "/run/host-services/ssh-auth.sock"},
+        {"type": "bind", "source": "/var/www/html", "target": "/var/www/html"},
+        {"type": "volume", "source": "bashhistory", "target": "/bash_history"}
+      ],
+      "cap_add": ["SYS_PTRACE"],
+      "depends_on": {"db": {"condition": "service_started"}}
+    },
+    "nginx": {
+      "image": "docker.io/wardenenv/nginx:1.24",
+      "hostname": "testenv-nginx",
+      "environment": {"XDEBUG_CONNECT_BACK_HOST": ""},
+      "volumes": [
+        {"type": "bind", "source": "/var/www/html", "target": "/var/www/html"}
+      ],
+      "depends_on": {"php-fpm": {"condition": "service_started"}}
+    }
+  },
+  "volumes": {
+    "dbdata": {},
+    "bashhistory": {}
+  }
+}

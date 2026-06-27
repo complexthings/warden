@@ -42,9 +42,18 @@ function translateService {
     ' <<< "$compose_json" 2>/dev/null || true)
 
     # volumes: object form {type,source,target} or string form "src:dst[:opts]"
-    # ponytail: sub() strips :cached from string form; object form naturally drops bind options
+    # ponytail: sub() strips :cached from string form; object form naturally drops bind options.
+    # SSH agent socket (story 10): /run/host-services/ssh-auth.sock is Docker-Desktop's socket;
+    # apple/container uses --ssh (verified: `container run --help` line: "--ssh  Forward SSH agent
+    # socket to container"). Detect it by source path, skip the -v entry, emit --ssh instead.
+    local ssh_flag=0
     while IFS= read -r vol; do
-        [[ -n "$vol" ]] && argv+=(-v "$vol")
+        [[ -z "$vol" ]] && continue
+        if [[ "$vol" == /run/host-services/ssh-auth.sock:* ]]; then
+            ssh_flag=1
+        else
+            argv+=(-v "$vol")
+        fi
     done < <(jq -r --arg svc "$svc" '
         .services[$svc].volumes[]? |
         if type == "string" then
@@ -53,6 +62,7 @@ function translateService {
             "\(.source):\(.target)"
         end
     ' <<< "$compose_json" 2>/dev/null || true)
+    [[ "${ssh_flag}" -eq 1 ]] && argv+=(--ssh)
 
     # command/entrypoint appended after image if present (optional)
     local extra=()
