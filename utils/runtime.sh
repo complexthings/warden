@@ -23,7 +23,9 @@ function assertRuntimeInstalled {
       fi
       ;;
     container)
-      : # ponytail: container branch stub; slice #5
+      if ! which container >/dev/null 2>&1; then
+        fatal "apple/container CLI ('container') could not be found; please install and try again."
+      fi
       ;;
   esac
 }
@@ -43,7 +45,12 @@ function assertRuntimeVersion {
       fi
       ;;
     container)
-      : # ponytail: container branch stub; slice #5
+      local require="1.0.0"
+      local installed
+      installed="$(container --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
+      if ! test "$(version "${installed}")" -ge "$(version "${require}")"; then
+        fatal "apple/container version should be ${require} or higher (${installed} installed)"
+      fi
       ;;
   esac
 }
@@ -57,7 +64,13 @@ function assertRuntimeRunning {
       fi
       ;;
     container)
-      : # ponytail: container branch stub; slice #5
+      local status_out
+      # Non-zero exit means the service is not running; also guard against a
+      # zero exit with no "status … running" table row (OR condition from spec).
+      if ! status_out="$(container system status 2>&1)" || \
+         ! echo "${status_out}" | grep -qE '^status[[:space:]]+running'; then
+        fatal "apple/container service is not running. Start it with 'container system start'."
+      fi
       ;;
   esac
 }

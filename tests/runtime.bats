@@ -204,3 +204,121 @@ STUB
     [ "$status" -ne 0 ]
     [[ "$output" == *"Docker does not appear to be running. Please start Docker."* ]]
 }
+
+# ---------------------------------------------------------------------------
+# PRD-0.4 — container runtime (apple/container) preflight checks
+# ---------------------------------------------------------------------------
+
+@test "assertRuntimeInstalled (container): passes when container binary is present" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    printf '#!/bin/sh\nexit 0\n' > "${fake_bin}/container"
+    chmod +x "${fake_bin}/container"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" PATH="${fake_bin}:/usr/bin:/bin" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertRuntimeInstalled
+    "
+    rm -rf "${fake_bin}"
+    [ "$status" -eq 0 ]
+}
+
+@test "assertRuntimeInstalled (container): fatal when container binary is absent" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    empty_bin="$(mktemp -d)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" PATH="${empty_bin}:/usr/bin:/bin" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertRuntimeInstalled
+    "
+    rm -rf "${empty_bin}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"container"* ]]
+    [[ "$output" == *"could not be found"* ]]
+}
+
+@test "assertRuntimeVersion (container): passes when version >= 1.0.0 (at floor)" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    cat > "${fake_bin}/container" <<'STUB'
+#!/bin/sh
+case "$1" in
+    --version) echo "container CLI version 1.0.0 (build: release, commit: ee848e3)"; exit 0 ;;
+    *) exit 0 ;;
+esac
+STUB
+    chmod +x "${fake_bin}/container"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" PATH="${fake_bin}:/usr/bin:/bin" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertRuntimeVersion
+    "
+    rm -rf "${fake_bin}"
+    [ "$status" -eq 0 ]
+}
+
+@test "assertRuntimeVersion (container): fatal when version < 1.0.0" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    cat > "${fake_bin}/container" <<'STUB'
+#!/bin/sh
+case "$1" in
+    --version) echo "container CLI version 0.9.0 (build: release, commit: abc1234)"; exit 0 ;;
+    *) exit 0 ;;
+esac
+STUB
+    chmod +x "${fake_bin}/container"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" PATH="${fake_bin}:/usr/bin:/bin" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertRuntimeVersion
+    "
+    rm -rf "${fake_bin}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"1.0.0"* ]]
+    [[ "$output" == *"0.9.0"* ]]
+}
+
+@test "assertRuntimeRunning (container): passes when container system status shows running" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    cat > "${fake_bin}/container" <<'STUB'
+#!/bin/sh
+if [ "$1" = "system" ] && [ "$2" = "status" ]; then
+    printf "status             running\n"
+    exit 0
+fi
+exit 0
+STUB
+    chmod +x "${fake_bin}/container"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" PATH="${fake_bin}:/usr/bin:/bin" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertRuntimeRunning
+    "
+    rm -rf "${fake_bin}"
+    [ "$status" -eq 0 ]
+}
+
+@test "assertRuntimeRunning (container): fatal when container system status reports not running" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    cat > "${fake_bin}/container" <<'STUB'
+#!/bin/sh
+if [ "$1" = "system" ] && [ "$2" = "status" ]; then
+    echo "apiserver is not running and not registered with launchd"
+    exit 1
+fi
+exit 0
+STUB
+    chmod +x "${fake_bin}/container"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" PATH="${fake_bin}:/usr/bin:/bin" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertRuntimeRunning
+    "
+    rm -rf "${fake_bin}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"container"* ]]
+    [[ "$output" == *"not running"* ]]
+}
