@@ -18,7 +18,7 @@ macOS-only path; Docker path on Linux and Intel Macs is untouched.
 - **apple/container stability:** **1.0.0 is released** (verified installed: `container CLI version 1.0.0`). The earlier pre-1.0 churn caveat no longer applies; still a young runtime — pin versions and re-test on upgrades.
 - **OQ-6 / DNS on macOS 26 — RESOLVED (verified FALSE, 2026-06-27 on macOS 26.6):** A unicast responder on `127.0.0.1:53` received `*.warden.test` system-resolver queries, which resolved to 127.0.0.1; a `.example` control with no resolver entry did not reach it. `/etc/resolver/test` **is honored** (registered as `scutil` resolver #8); mDNSResponder does **not** hijack multi-label `.test` names. The community-gist claim does not hold for warden's case on 26.6 — warden's dnsmasq + `/etc/resolver/test` DNS pattern works with no change. (Caveat: re-test if Apple alters mDNSResponder in later builds.) See §2.
 - **Scope:** This outline covers `bin/warden`, `utils/`, `commands/`, and `environments/` in the warden CLI repo only. The warden/images repo is covered under §7 (Images). The docs (wardenenv/docs) assume Docker Desktop throughout; docs updates are out of scope here.
-- **Orchestration design decided:** §1 records the decision — an external helper binary.
+- **Orchestration design decided:** §1 records the decision — a bash+jq translator that delegates YAML resolution to `docker compose config` (supersedes the earlier external-binary idea; see §1 OQ-1).
 
 ---
 
@@ -35,7 +35,7 @@ macOS-only path; Docker path on Linux and Intel Macs is untouched.
 - **Required change:** A translation/orchestration layer that reads the same partial YAML files and converts each service definition into `container run` invocations with equivalent flags (`-e`, `-p`, `-v`, `--network`, `--name`, etc.).
 - The ~70 partials are the authoritative service definitions; they must drive the new layer — do not diverge them.
 - The override hierarchy must be preserved so per-project `.warden/environments/` overrides still work.
-- **RESOLVED-BY-DECISION OQ-1:** The compose→container translation layer is an **external helper binary** (Go or Python). It parses the ~70 YAML partials, preserves the 6-layer override hierarchy, emits/executes `container run` invocations, handles startup ordering, and generates the Traefik file-provider config. Warden stays Bash for dispatch; the binary is a new build/distribution dependency (trade-off: warden gains a compiled artifact it must version and ship).
+- **RESOLVED-BY-DECISION OQ-1 (superseded by PRD-1: bash+jq + `docker compose config`):** ~~The compose→container translation layer is an **external helper binary** (Go or Python).~~ The translator is **bash + jq** in `utils/orchestrate.sh`; `docker compose -f <list> config --format json` resolves YAML anchors/interpolation/merges before jq ever touches the output. No compiled artifact; no new build/distribution dependency. The binary decision is reversed because its sole justification (YAML parsing) is now handled by docker-compose-CLI. Residual trade-off: docker-compose-CLI dependency remains on the container path (acceptable for a migration tool). See PRD-1 for the full rationale.
 - **RESOLVED-BY-DECISION OQ-2:** `depends_on` / healthcheck startup ordering is the helper binary's responsibility: explicit ordered starts + readiness polling. The binary sequences container starts; warden Bash does not need to know the ordering graph.
 
 ---
@@ -233,7 +233,7 @@ Each must be replaced with `container inspect` / `container list` or an equivale
 
 | # | Status | Answer / What to run | Blocks |
 |---|--------|----------------------|--------|
-| OQ-1 | RESOLVED-BY-DECISION | External helper binary (Go/Python) owns YAML→container translation, override hierarchy, startup ordering, and Traefik config gen; warden stays Bash. Trade-off: new build/dist dep. | §1, core orchestration |
+| OQ-1 | RESOLVED-BY-DECISION (superseded by PRD-1) | bash+jq in `utils/orchestrate.sh`; `docker compose config --format json` handles YAML parsing. No binary, no build/dist dep. Trade-off: docker-compose-CLI dependency on container path. | §1, core orchestration |
 | OQ-2 | RESOLVED-BY-DECISION | Startup ordering owned by the helper binary: explicit ordered starts + readiness polling. | §1 |
 | OQ-3 | PARTIAL | Container IPs on 192.168.64.0/24, DHCP-assigned, unstable across restarts. Required: re-read via `container inspect \| jq -r '.networks[0].address'` on each `env up`, or pin MAC. (oq-networking.md, issue #282) | §2, Traefik |
 | OQ-4 | RESOLVED | NO `container network connect`. Network assigned at creation only via `--network`. Drives flat-network DECISION. (oq-networking.md, command-reference.md, discussion #244) | §2, peered services |
@@ -265,10 +265,10 @@ Each must be replaced with `container inspect` / `container list` or an equivale
 - **Exit:** `WARDEN_CONTAINER_RUNTIME=container warden` passes binary/daemon checks; Docker path unchanged.
 - **Depends:** none.
 
-### PRD-1 — Orchestrator helper binary (skeleton)
-- **Goal:** external Go/Python binary (RESOLVED-BY-DECISION OQ-1) that parses the 6-path × 3-suffix compose layering (`utils/env.sh:164-193`), merges overrides, emits `container run` for the core stack; startup ordering via ordered starts + readiness polling (OQ-2).
-- **Scope:** YAML parse + override merge + translate `-e/-p/-v/--name/--network`; binary build/dist. Enough flags for php-fpm/nginx/db only.
-- **Exit:** `warden env up` (container path) starts php-fpm+nginx+db containers (no proxy/network polish yet).
+### PRD-1 — Compose-to-container translator: bash+jq (core stack)
+- **Goal:** bash+jq orchestrator in `utils/orchestrate.sh` (superseded: was external binary, see §1 OQ-1 update) that shells out to `docker compose -f <list> config --format json` for fully resolved config, then translates per-service fields to `container run` invocations; startup ordering via topological sort of `depends_on` + readiness polling (OQ-2).
+- **Scope:** translate image/hostname/environment/volumes/depends_on for php-fpm/nginx/db; pre-create named volumes; strip `:cached`, use `--ssh`, drop `userns_mode`/labels/networks. `env` removed from unported-command guard.
+- **Exit:** `warden env up` (container path) starts php-fpm+nginx+db in `container ls`; Docker path unchanged.
 - **Depends:** PRD-0.
 
 ### PRD-2 — Flat network + DNS + IP discovery
