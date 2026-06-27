@@ -102,6 +102,10 @@ if [[ ${WARDEN_HELP} ]]; then
   source "${WARDEN_DIR}/commands/usage.cmd"
 fi
 
+## guard unported commands on the container runtime; skip on the help path
+if [[ -n "${WARDEN_CMD_VERB}" && ! "${WARDEN_HELP}" ]]; then
+  assertCommandSupportedForRuntime "${WARDEN_CMD_VERB}"
+fi
 
 ## execute sub-command in context of this script
 source "${WARDEN_CMD_EXEC}"

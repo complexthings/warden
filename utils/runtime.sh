@@ -74,3 +74,27 @@ function assertRuntimeRunning {
       ;;
   esac
 }
+
+# ponytail: guard fires only on container runtime; docker runtime is fully ported so it
+# always returns 0. Allowlist seeds with meta/read-only commands that don't need
+# orchestration (version, doctor, help) so warden stays inspectable on the container
+# runtime. Every orchestration command (env, svc, db, shell, …) is blocked until its
+# own PRD ports it.
+function assertCommandSupportedForRuntime {
+  local cmd="${1}"
+  [[ "${WARDEN_CONTAINER_RUNTIME}" != "container" ]] && return 0
+  local -a _ported=(version doctor help)
+  local v
+  for v in "${_ported[@]}"; do
+    [[ "${cmd}" == "${v}" ]] && return 0
+  done
+  fatal "warden ${cmd} is not yet supported on the container runtime."
+}
+
+function printActiveRuntime {
+  local runtime="${WARDEN_CONTAINER_RUNTIME:-docker}"
+  case "${runtime}" in
+    container) echo "Container runtime: container (apple/container)" ;;
+    *)         echo "Container runtime: docker" ;;
+  esac
+}

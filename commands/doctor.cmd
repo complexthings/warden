@@ -31,6 +31,7 @@ fi
 echo
 
 echo -e "\033[32mContainer runtime and compose information:\033[0m"
+printActiveRuntime
 docker --version
 ${DOCKER_COMPOSE_COMMAND} version
 echo

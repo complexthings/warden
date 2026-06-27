@@ -322,3 +322,61 @@ STUB
     [[ "$output" == *"container"* ]]
     [[ "$output" == *"not running"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# PRD-0.5 — unported-command guard + active runtime surfacing
+# ---------------------------------------------------------------------------
+
+@test "assertCommandSupportedForRuntime (container): unported command fatals naming the command" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertCommandSupportedForRuntime env
+    "
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"env"* ]]
+}
+
+@test "assertCommandSupportedForRuntime (docker): any command passes silently" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="docker" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertCommandSupportedForRuntime env
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "assertCommandSupportedForRuntime (container): allowlisted command (version) passes" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertCommandSupportedForRuntime version
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "printActiveRuntime: echoes docker label when runtime is docker" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="docker" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        printActiveRuntime
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"docker"* ]]
+}
+
+@test "printActiveRuntime: echoes container label when runtime is container" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        printActiveRuntime
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"container"* ]]
+    [[ "$output" == *"apple/container"* ]]
+}
