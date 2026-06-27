@@ -66,3 +66,52 @@ STUB
     [ "$status" -ne 0 ]
     [[ "$output" == *"compose config"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Issue #9 AC: docker runtime passthrough — orchestrate routing condition
+# ---------------------------------------------------------------------------
+# env.cmd's routing guard is: [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" && ... ]]
+# On docker runtime (or unset) the condition is false → docker compose passthrough.
+# We test the guard condition directly via resolveContainerRuntime, which normalises
+# the value. Full env.cmd bootstrap would require a project .env on disk; this seam
+# is sufficient to prove the container path is not taken.
+# ponytail: limitation — does not exercise env.cmd's exec path, only the resolver that
+# feeds the guard. A full integration test would need a real project tree.
+
+@test "docker runtime: resolveContainerRuntime returns 'docker' when WARDEN_CONTAINER_RUNTIME=docker" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" \
+        WARDEN_CONTAINER_RUNTIME="docker" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        resolveContainerRuntime
+    "
+    [ "$status" -eq 0 ]
+    [ "$output" = "docker" ]
+}
+
+@test "docker runtime: resolveContainerRuntime returns 'docker' when WARDEN_CONTAINER_RUNTIME is unset" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" bash -c "
+        unset WARDEN_CONTAINER_RUNTIME
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        resolveContainerRuntime
+    "
+    [ "$status" -eq 0 ]
+    [ "$output" = "docker" ]
+}
+
+@test "docker runtime: orchestrate routing condition is false when WARDEN_CONTAINER_RUNTIME=docker" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    # Directly evaluate the env.cmd routing guard; exit 0 = guard is false (docker path taken)
+    run env WARDEN_DIR="${repo_root}" \
+        WARDEN_CONTAINER_RUNTIME="docker" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        rt=\"\$(resolveContainerRuntime)\"
+        # Guard condition from env.cmd: container runtime AND 'up' subcommand
+        [[ \"\${rt}\" == 'container' ]] && exit 1 || exit 0
+    "
+    [ "$status" -eq 0 ]
+}

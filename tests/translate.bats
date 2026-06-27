@@ -211,3 +211,38 @@ STUB
     [[ -n "$inv_line" ]]
     [ "${log_line}" -lt "${inv_line}" ]
 }
+
+@test "translateService: SSH_AUTH_SOCK env dropped and --ssh emitted when ssh-auth.sock volume present" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+
+    # php-fpm-style fixture: has the docker-desktop ssh-auth.sock volume AND SSH_AUTH_SOCK env var
+    # plus another env var (COMPOSER_HOME) that must NOT be dropped
+    ssh_json='{"services":{"php-fpm":{"image":"docker.io/wardenenv/php-fpm:8.3","environment":{"SSH_AUTH_SOCK":"/run/host-services/ssh-auth.sock","COMPOSER_HOME":"/home/www-data/.composer"},"volumes":[{"type":"bind","source":"/run/host-services/ssh-auth.sock","target":"/run/host-services/ssh-auth.sock"},{"type":"bind","source":"/app","target":"/var/www/html"}]}},"volumes":{}}'
+
+    cat > "${fake_bin}/container" <<'STUB'
+#!/bin/sh
+echo "$*"
+exit 0
+STUB
+    chmod +x "${fake_bin}/container"
+
+    run env WARDEN_DIR="${repo_root}" \
+        WARDEN_ENV_NAME="testenv" \
+        PATH="${fake_bin}:${PATH}" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/orchestrate.sh'
+        translateService '${ssh_json}' php-fpm
+    "
+    rm -rf "${fake_bin}"
+
+    [ "$status" -eq 0 ]
+    # --ssh must be emitted
+    [[ "$output" == *"--ssh"* ]]
+    # SSH_AUTH_SOCK must NOT appear as a -e arg (runtime sets the correct value)
+    [[ "$output" != *"-e SSH_AUTH_SOCK="* ]]
+    # other env vars must still be forwarded
+    [[ "$output" == *"-e COMPOSER_HOME=/home/www-data/.composer"* ]]
+    # app bind mount must still be forwarded
+    [[ "$output" == *"-v /app:/var/www/html"* ]]
+}
