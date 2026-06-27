@@ -79,6 +79,12 @@ fi
 ## configure docker compose files
 DOCKER_COMPOSE_ARGS=()
 
+## on the container runtime: disable mutagen before partial assembly so that
+## .mutagen_compose.yml partials are excluded from DOCKER_COMPOSE_ARGS
+if [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" ]]; then
+    WARDEN_MUTAGEN_ENABLE=0
+fi
+
 appendEnvPartialIfExists "networks"
 
 if [[ ${WARDEN_ENV_TYPE} != local ]]; then
@@ -159,6 +165,15 @@ if [[ ${WARDEN_SELENIUM_DEBUG} -eq 1 ]]; then
     export WARDEN_SELENIUM_DEBUG="-debug"
 else
     export WARDEN_SELENIUM_DEBUG=
+fi
+
+## on the container runtime: route env up to the orchestrator; skip docker
+## network/peering code entirely — the container path never reaches it
+if [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" && "${WARDEN_PARAMS[0]}" == "up" ]]; then
+    # shellcheck disable=SC1091
+    source "${WARDEN_DIR}/utils/orchestrate.sh"
+    orchestrateEnvUp
+    return 0
 fi
 
 ## disconnect peered service containers from environment network

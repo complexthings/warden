@@ -379,10 +379,10 @@ STUB
     run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
         source '${repo_root}/utils/core.sh'
         source '${repo_root}/utils/runtime.sh'
-        assertCommandSupportedForRuntime env
+        assertCommandSupportedForRuntime svc
     "
     [ "$status" -ne 0 ]
-    [[ "$output" == *"env"* ]]
+    [[ "$output" == *"svc"* ]]
 }
 
 @test "assertCommandSupportedForRuntime (docker): any command passes silently" {

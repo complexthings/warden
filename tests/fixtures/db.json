@@ -1,0 +1,28 @@
+{
+  "services": {
+    "db": {
+      "image": "docker.io/wardenenv/mariadb:10.6",
+      "hostname": "testenv-mariadb",
+      "environment": {
+        "MYSQL_ROOT_PASSWORD": "app",
+        "MYSQL_DATABASE": "app",
+        "MYSQL_USER": "app",
+        "MYSQL_HISTFILE": "/sql_history/.sql_history"
+      },
+      "volumes": [
+        {"type": "volume", "source": "dbdata", "target": "/var/lib/mysql"},
+        {"type": "volume", "source": "sqlhistory", "target": "/sql_history"}
+      ],
+      "userns_mode": "host",
+      "labels": {
+        "traefik.enable": "true",
+        "traefik.http.routers.db.rule": "Host(`db.test`)"
+      },
+      "networks": {"warden": {}}
+    }
+  },
+  "volumes": {
+    "dbdata": {},
+    "sqlhistory": {}
+  }
+}

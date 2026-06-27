@@ -95,7 +95,7 @@ function assertRuntimeRunning {
 function assertCommandSupportedForRuntime {
   local cmd="${1}"
   [[ "${WARDEN_CONTAINER_RUNTIME}" != "container" ]] && return 0
-  local -a _ported=(version doctor help)
+  local -a _ported=(version doctor help env)
   local v
   for v in "${_ported[@]}"; do
     [[ "${cmd}" == "${v}" ]] && return 0
