@@ -62,13 +62,60 @@
     [[ "$output" == *"container"* ]]
 }
 
-@test "resolveContainerRuntime: explicitly set value overrides unset default" {
+@test "resolveContainerRuntime: project .env beats global .env (honest two-level precedence)" {
     repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
-    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
+    global_home="$(mktemp -d)"
+    project_dir="$(mktemp -d)"
+    echo "WARDEN_CONTAINER_RUNTIME=docker" > "${global_home}/.env"
+    echo "WARDEN_CONTAINER_RUNTIME=container" > "${project_dir}/.env"
+    run env WARDEN_DIR="${repo_root}" bash -c "
         source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/env.sh'
         source '${repo_root}/utils/runtime.sh'
+        unset WARDEN_CONTAINER_RUNTIME
+        resolveRuntimeFromFiles '${global_home}' '${project_dir}'
         resolveContainerRuntime
     "
+    rm -rf "${global_home}" "${project_dir}"
+    [ "$status" -eq 0 ]
+    [ "$output" = "container" ]
+}
+
+@test "resolveContainerRuntime: global .env used when no project .env" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    global_home="$(mktemp -d)"
+    echo "WARDEN_CONTAINER_RUNTIME=container" > "${global_home}/.env"
+    run env WARDEN_DIR="${repo_root}" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/env.sh'
+        source '${repo_root}/utils/runtime.sh'
+        unset WARDEN_CONTAINER_RUNTIME
+        resolveRuntimeFromFiles '${global_home}' ''
+        resolveContainerRuntime
+    "
+    rm -rf "${global_home}"
+    [ "$status" -eq 0 ]
+    [ "$output" = "container" ]
+}
+
+@test "resolveContainerRuntime: shell export beats both .env files" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    global_home="$(mktemp -d)"
+    project_dir="$(mktemp -d)"
+    echo "WARDEN_CONTAINER_RUNTIME=docker" > "${global_home}/.env"
+    echo "WARDEN_CONTAINER_RUNTIME=docker" > "${project_dir}/.env"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/env.sh'
+        source '${repo_root}/utils/runtime.sh'
+        _warden_runtime_shell=\"\${WARDEN_CONTAINER_RUNTIME:-}\"
+        if [[ -z \"\${_warden_runtime_shell}\" ]]; then
+            unset WARDEN_CONTAINER_RUNTIME
+            resolveRuntimeFromFiles '${global_home}' '${project_dir}'
+        fi
+        resolveContainerRuntime
+    "
+    rm -rf "${global_home}" "${project_dir}"
     [ "$status" -eq 0 ]
     [ "$output" = "container" ]
 }

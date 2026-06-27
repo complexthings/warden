@@ -21,16 +21,31 @@ source "${WARDEN_DIR}/utils/svc.sh"
 source "${WARDEN_DIR}/utils/env.sh"
 source "${WARDEN_DIR}/utils/runtime.sh"
 
-# ponytail: validates/normalizes WARDEN_CONTAINER_RUNTIME from shell env early; project .env
-# is loaded per-command (via loadEnvConfig) so project-level overrides apply there instead
+## define WARDEN_HOME_DIR early — needed to read global .env for runtime resolution
+export readonly WARDEN_HOME_DIR="${WARDEN_HOME_DIR:-"$HOME/.warden"}"
+
+# Resolve WARDEN_CONTAINER_RUNTIME with three-level precedence:
+#   1. shell-exported value (WARDEN_CONTAINER_RUNTIME=x warden ...)   ← wins
+#   2. project .env  (nearest ancestor dir containing WARDEN_ENV_NAME)
+#   3. global ~/.warden/.env
+#   4. built-in default: docker
+# Capture shell-exported value before any file loads so we can honour it
+_warden_runtime_shell="${WARDEN_CONTAINER_RUNTIME:-}"
+if [[ -z "${_warden_runtime_shell}" ]]; then
+  unset WARDEN_CONTAINER_RUNTIME
+  _warden_env_early="$(locateEnvPath 2>/dev/null)" || true
+  resolveRuntimeFromFiles "${WARDEN_HOME_DIR}" "${_warden_env_early:-}"
+  unset _warden_env_early
+fi
+unset _warden_runtime_shell
+
 WARDEN_CONTAINER_RUNTIME="$(resolveContainerRuntime)"
 export WARDEN_CONTAINER_RUNTIME
 
 assertRuntimeInstalled
 assertRuntimeVersion
 
-## define and export global shared directory paths
-export readonly WARDEN_HOME_DIR="${WARDEN_HOME_DIR:-"$HOME/.warden"}"
+## define and export remaining global shared directory paths
 export readonly WARDEN_SSL_DIR="${WARDEN_HOME_DIR}/ssl"
 export readonly WARDEN_COMPOSER_DIR="${WARDEN_COMPOSER_DIR:-"$HOME/.composer"}"
 

@@ -5,6 +5,18 @@
 
 # ponytail: empty stubs only; runtime logic lands in PRD-0.2 and later slices
 
+## Populate WARDEN_CONTAINER_RUNTIME from .env files — safe, no eval.
+## Priority: project .env > global .env. resolveContainerRuntime normalises + validates.
+## Only called when the shell did NOT export WARDEN_CONTAINER_RUNTIME.
+## Args: $1 = WARDEN_HOME_DIR, $2 = project dir path (may be empty string)
+function resolveRuntimeFromFiles {
+  local home_dir="${1:-}" project_path="${2:-}"
+  # global first (lowest file priority); project second (overwrites if key present)
+  # Use if/fi rather than && to avoid set -e false-positive on empty strings
+  if [[ -n "${home_dir}" ]]; then loadEnvFile "${home_dir}/.env" "WARDEN_CONTAINER_RUNTIME"; fi
+  if [[ -n "${project_path}" ]]; then loadEnvFile "${project_path}/.env" "WARDEN_CONTAINER_RUNTIME"; fi
+}
+
 function resolveContainerRuntime {
   local runtime
   runtime="$(echo "${WARDEN_CONTAINER_RUNTIME:-docker}" | tr '[:upper:]' '[:lower:]')"
