@@ -6,7 +6,12 @@
 # ponytail: empty stubs only; runtime logic lands in PRD-0.2 and later slices
 
 function resolveContainerRuntime {
-  :
+  local runtime
+  runtime="$(echo "${WARDEN_CONTAINER_RUNTIME:-docker}" | tr '[:upper:]' '[:lower:]')"
+  case "${runtime}" in
+    docker|container) echo "${runtime}" ;;
+    *) fatal "WARDEN_CONTAINER_RUNTIME '${WARDEN_CONTAINER_RUNTIME}' is invalid; accepted values: docker, container" ;;
+  esac
 }
 
 function assertRuntimeInstalled {

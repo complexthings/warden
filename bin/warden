@@ -21,6 +21,11 @@ source "${WARDEN_DIR}/utils/svc.sh"
 source "${WARDEN_DIR}/utils/env.sh"
 source "${WARDEN_DIR}/utils/runtime.sh"
 
+# ponytail: validates/normalizes WARDEN_CONTAINER_RUNTIME from shell env early; project .env
+# is loaded per-command (via loadEnvConfig) so project-level overrides apply there instead
+WARDEN_CONTAINER_RUNTIME="$(resolveContainerRuntime)"
+export WARDEN_CONTAINER_RUNTIME
+
 ## verify docker is installed
 if ! which docker >/dev/null; then
   fatal "docker could not be found; please install and try again."
