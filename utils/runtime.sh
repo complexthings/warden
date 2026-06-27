@@ -15,13 +15,49 @@ function resolveContainerRuntime {
 }
 
 function assertRuntimeInstalled {
-  :
+  local runtime="${WARDEN_CONTAINER_RUNTIME:-docker}"
+  case "${runtime}" in
+    docker)
+      if ! which docker >/dev/null 2>&1; then
+        fatal "docker could not be found; please install and try again."
+      fi
+      ;;
+    container)
+      : # ponytail: container branch stub; slice #5
+      ;;
+  esac
 }
 
 function assertRuntimeVersion {
-  :
+  local runtime="${WARDEN_CONTAINER_RUNTIME:-docker}"
+  local dc_cmd="${DOCKER_COMPOSE_COMMAND:-"docker compose"}"
+  case "${runtime}" in
+    docker)
+      if [[ "${dc_cmd}" == "docker compose" ]]; then
+        local require="2.2.3"
+        local installed
+        installed="$(${dc_cmd} version | grep -oE '[0-9\.]+' | head -n1)"
+        if ! test "$(version "${installed}")" -ge "$(version "${require}")"; then
+          fatal "docker compose version should be ${require} or higher (${installed} installed)"
+        fi
+      fi
+      ;;
+    container)
+      : # ponytail: container branch stub; slice #5
+      ;;
+  esac
 }
 
 function assertRuntimeRunning {
-  :
+  local runtime="${WARDEN_CONTAINER_RUNTIME:-docker}"
+  case "${runtime}" in
+    docker)
+      if ! docker system info >/dev/null 2>&1; then
+        fatal "Docker does not appear to be running. Please start Docker."
+      fi
+      ;;
+    container)
+      : # ponytail: container branch stub; slice #5
+      ;;
+  esac
 }

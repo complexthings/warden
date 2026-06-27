@@ -37,9 +37,7 @@ function containsElement {
 
 ## verify docker is running
 function assertDockerRunning {
-  if ! docker system info >/dev/null 2>&1; then
-    fatal "Docker does not appear to be running. Please start Docker."
-  fi
+  assertRuntimeRunning  # ponytail: thin wrapper; assertRuntimeRunning owns the logic
 }
 
 ## use this to add services that can be opted in/out of
