@@ -28,7 +28,7 @@ STUB
     run env WARDEN_DIR="${repo_root}" \
         WARDEN_ENV_PATH="/tmp" \
         WARDEN_ENV_NAME="testenv" \
-        PATH="${fake_bin}:/usr/bin:/bin" bash -c "
+        PATH="${fake_bin}:${PATH}" bash -c "
         source '${repo_root}/utils/core.sh'
         source '${repo_root}/utils/orchestrate.sh'
         DOCKER_COMPOSE_ARGS=()
