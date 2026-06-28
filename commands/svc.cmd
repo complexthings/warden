@@ -42,6 +42,12 @@ if [[ "$WARDEN_DNSMASQ_ENABLE" == "1" ]]; then
     DOCKER_COMPOSE_ARGS+=("${WARDEN_DIR}/docker/docker-compose.dnsmasq.yml")
 fi
 
+# Container runtime: overlay replaces WARDEN_DNSMASQ_CONF (drops .test catch-all; adds addn-hosts mount)
+if [[ "${WARDEN_CONTAINER_RUNTIME:-}" == "container" && "${WARDEN_DNSMASQ_ENABLE}" == "1" ]]; then
+    DOCKER_COMPOSE_ARGS+=("-f")
+    DOCKER_COMPOSE_ARGS+=("${WARDEN_DIR}/docker/docker-compose.dnsmasq.container.yml")
+fi
+
 WARDEN_PORTAINER_ENABLE="${WARDEN_PORTAINER_ENABLE:-0}"
 if [[ "${WARDEN_PORTAINER_ENABLE}" == 1 ]]; then
     DOCKER_COMPOSE_ARGS+=("-f")

@@ -1,0 +1,20 @@
+services:
+
+  dnsmasq:
+    environment:
+      WARDEN_DNSMASQ_CONF: |-
+        #dnsmasq config — container-runtime overlay: no .test catch-all; addn-hosts for per-project records
+
+        #dont use hosts nameservers
+        no-resolv
+
+        #use cloudflare as default nameservers, prefer 1^4
+        server=${WARDEN_DNSMASQ_NS1:-1.0.0.1}
+        server=${WARDEN_DNSMASQ_NS2:-1.1.1.1}
+        strict-order
+
+        #per-project A-records written by 'warden env up'; reload on SIGHUP
+        addn-hosts=/etc/dnsmasq.d/
+        ${WARDEN_DNSMASQ_CONF_ADDITIONAL:-}
+    volumes:
+      - ${WARDEN_HOME_DIR}/dnsmasq.d:/etc/dnsmasq.d

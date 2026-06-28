@@ -98,6 +98,15 @@ function translateService {
      (.command    // empty | if type == "array" then .[] else . end))
   ' <<< "$compose_json" 2>/dev/null || true)
 
+  # Container runtime: inject custom DNS for php-fpm/php-debug so bare backend hostnames
+  # (db, redis, …) resolve via dnsmasq per-project addn-hosts records.
+  # ponytail: hardcoded service names; generalise to dns:/dns_search: compose keys if more services need it.
+  if [[ "${WARDEN_CONTAINER_RUNTIME:-}" == "container" ]] \
+     && [[ "$svc" == "php-fpm" || "$svc" == "php-debug" ]] \
+     && [[ -n "${WARDEN_DNSMASQ_IP:-}" ]]; then
+    argv+=(--dns "${WARDEN_DNSMASQ_IP}" --dns-search "${WARDEN_ENV_NAME}.test")
+  fi
+
   # Log full argv to stderr before execution (story 20)
   >&2 echo "[warden] container run --detach ${argv[*]} ${image}${extra[*]:+ ${extra[*]}}"
 
@@ -197,6 +206,39 @@ function waitForRunning {
   fatal "container '${name}' did not reach running state after ${WARDEN_POLL_MAX_RETRIES} retries"
 }
 
+## writeEnvDnsRecords: write per-project addn-hosts file to ~/.warden/dnsmasq.d/<env>.hosts
+## and signal dnsmasq to reload (SIGHUP re-reads all addn-hosts on the running instance).
+##
+## Format: standard /etc/hosts — "<ip>\t<svc>.<env>.test" — one line per compose service.
+## Truncates on each env up; a stale file between runs is harmless (records are overwritten).
+## Reuses resolveContainerName so run/readiness/dns paths cannot drift.
+function writeEnvDnsRecords {
+  local compose_json="$1"
+  local hosts_file="${WARDEN_HOME_DIR}/dnsmasq.d/${WARDEN_ENV_NAME}.hosts"
+  local svc name ip
+
+  mkdir -p "${WARDEN_HOME_DIR}/dnsmasq.d"
+  : > "${hosts_file}"  # truncate
+
+  while IFS= read -r svc; do
+    [[ -z "$svc" ]] && continue
+    name="$(resolveContainerName "$compose_json" "$svc")"
+    # ponytail: inspect schema unverified — try both candidate shapes; cut strips /CIDR.
+    ip="$(container inspect "${name}" 2>/dev/null \
+        | jq -r '(.[0].status.networks[0].ipv4Address // .[0].networks[0].address // empty)' 2>/dev/null | cut -d/ -f1 || true)"
+    if [[ -n "$ip" ]]; then
+      printf '%s\t%s.%s.test\n' "$ip" "$svc" "${WARDEN_ENV_NAME}" >> "${hosts_file}"
+    else
+      warning "dnsmasq: no IP for '${name}' — DNS record for ${svc}.${WARDEN_ENV_NAME}.test will be missing"
+    fi
+  done < <(jq -r '.services | keys[]' <<< "$compose_json")
+
+  >&2 echo "[warden] dnsmasq: reloading records for ${WARDEN_ENV_NAME}"
+  # shellcheck disable=SC2016  # single quotes intentional: $(pidof dnsmasq) expands inside container sh
+  container exec dnsmasq sh -c 'kill -HUP $(pidof dnsmasq)' 2>/dev/null || \
+    warning "dnsmasq SIGHUP failed — DNS records may not be active"
+}
+
 ## orchestrateEnvUp: render the assembled DOCKER_COMPOSE_ARGS partial list to flat
 ## JSON via docker compose config, pre-create named volumes, then translate+run each
 ## service in topological order, waiting for each to reach running state.
@@ -229,6 +271,11 @@ function orchestrateEnvUp {
     translateService "$compose_json" "$svc"
     waitForRunning "$(resolveContainerName "$compose_json" "$svc")"
   done < <(topoSortServices "$compose_json")
+
+  # Container runtime: write per-project dnsmasq A-records now that all containers have IPs
+  if [[ "${WARDEN_CONTAINER_RUNTIME:-}" == "container" ]]; then
+    writeEnvDnsRecords "$compose_json"
+  fi
 }
 
 ## orchestrateSvcDown: stop exactly the services `svc up` started. Enumerates from

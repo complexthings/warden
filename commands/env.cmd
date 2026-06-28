@@ -167,12 +167,38 @@ else
     export WARDEN_SELENIUM_DEBUG=
 fi
 
-## on the container runtime: route env up to the orchestrator; skip docker
-## network/peering code entirely — the container path never reaches it
-if [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" && "${WARDEN_PARAMS[0]}" == "up" ]]; then
+## on the container runtime: bypass docker compose; handle up ourselves
+## (down routing + dnsmasq record cleanup land in PRD-2.4 #19)
+if [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" ]]; then
     # shellcheck disable=SC1091
     source "${WARDEN_DIR}/utils/orchestrate.sh"
-    orchestrateEnvUp
+
+    if [[ "${WARDEN_PARAMS[0]}" == "up" ]]; then
+        # Inspect dnsmasq once; derive both the dnsmasq IP (php-fpm --dns) and the
+        # gateway IP (nginx resolver) from the same JSON.
+        # ponytail: the apple/container 1.0.0 inspect schema is unverified — both candidate
+        # shapes (.status.networks[].ipv4Address and top-level .networks[].address) are tried;
+        # cut -d/ strips a /CIDR suffix whether present or not. NEEDS-TEST: confirm real schema.
+        dnsmasq_json="$(container inspect dnsmasq 2>/dev/null)"
+        WARDEN_DNSMASQ_IP="$(jq -r '(.[0].status.networks[0].ipv4Address // .[0].networks[0].address // empty)' <<< "${dnsmasq_json}" | cut -d/ -f1)"
+        [[ -z "${WARDEN_DNSMASQ_IP}" ]] \
+            && fatal "dnsmasq is not running; start global services with 'warden svc up' first"
+        export WARDEN_DNSMASQ_IP
+
+        # Gateway IP: nginx uses this as its resolver to reach <env>-php-fpm.test
+        NGINX_RESOLVER="$(jq -r '(.[0].status.networks[0].ipv4Gateway // .[0].networks[0].gateway // empty)' <<< "${dnsmasq_json}")"
+        export NGINX_RESOLVER
+
+        # Nginx upstream FQDNs: resolved via NGINX_RESOLVER on the default network
+        export NGINX_UPSTREAM_HOST="${WARDEN_ENV_NAME}-php-fpm.test"
+        export NGINX_UPSTREAM_DEBUG_HOST="${WARDEN_ENV_NAME}-php-debug.test"
+        export NGINX_UPSTREAM_SPX_HOST="${WARDEN_ENV_NAME}-php-spx.test"
+        export NGINX_UPSTREAM_BLACKFIRE_HOST="${WARDEN_ENV_NAME}-php-blackfire.test"
+
+        orchestrateEnvUp
+    fi
+    # ponytail: env-down routing + dnsmasq record cleanup land in PRD-2.4 (#19)
+
     return 0
 fi
 
