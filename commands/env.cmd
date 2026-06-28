@@ -196,8 +196,9 @@ if [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" ]]; then
         export NGINX_UPSTREAM_BLACKFIRE_HOST="${WARDEN_ENV_NAME}-php-blackfire.test"
 
         orchestrateEnvUp
+    elif [[ "${WARDEN_PARAMS[0]}" == "down" ]]; then
+        orchestrateEnvDown
     fi
-    # ponytail: env-down routing + dnsmasq record cleanup land in PRD-2.4 (#19)
 
     return 0
 fi

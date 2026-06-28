@@ -206,6 +206,16 @@ function waitForRunning {
   fatal "container '${name}' did not reach running state after ${WARDEN_POLL_MAX_RETRIES} retries"
 }
 
+## reloadDnsmasq: send SIGHUP to the running dnsmasq container so it re-reads
+## all addn-hosts files. Shared by writeEnvDnsRecords (env up) and
+## orchestrateEnvDown (env down) so the signal path cannot drift.
+function reloadDnsmasq {
+  >&2 echo "[warden] dnsmasq: reloading (${WARDEN_ENV_NAME})"
+  # shellcheck disable=SC2016  # single quotes intentional: $(pidof dnsmasq) expands inside container sh
+  container exec dnsmasq sh -c 'kill -HUP $(pidof dnsmasq)' 2>/dev/null || \
+    warning "dnsmasq SIGHUP failed — DNS records may not be active"
+}
+
 ## writeEnvDnsRecords: write per-project addn-hosts file to ~/.warden/dnsmasq.d/<env>.hosts
 ## and signal dnsmasq to reload (SIGHUP re-reads all addn-hosts on the running instance).
 ##
@@ -233,10 +243,7 @@ function writeEnvDnsRecords {
     fi
   done < <(jq -r '.services | keys[]' <<< "$compose_json")
 
-  >&2 echo "[warden] dnsmasq: reloading records for ${WARDEN_ENV_NAME}"
-  # shellcheck disable=SC2016  # single quotes intentional: $(pidof dnsmasq) expands inside container sh
-  container exec dnsmasq sh -c 'kill -HUP $(pidof dnsmasq)' 2>/dev/null || \
-    warning "dnsmasq SIGHUP failed — DNS records may not be active"
+  reloadDnsmasq
 }
 
 ## orchestrateEnvUp: render the assembled DOCKER_COMPOSE_ARGS partial list to flat
@@ -284,7 +291,7 @@ function orchestrateEnvUp {
 ## up/down paths cannot drift. No network deletion — the default network cannot be
 ## deleted (D-2.1 option a; command-reference.md preserves default/system networks).
 ##
-## Deps (set by svc.cmd): DOCKER_COMPOSE_ARGS, WARDEN_ENV_PATH, WARDEN_ENV_NAME.
+## Deps (set by svc.cmd or env.cmd): DOCKER_COMPOSE_ARGS, WARDEN_ENV_PATH, WARDEN_ENV_NAME.
 function orchestrateSvcDown {
   local compose_json
   if ! compose_json="$(docker compose \
@@ -303,4 +310,25 @@ function orchestrateSvcDown {
     >&2 echo "[warden] container stop ${name}"
     container stop "${name}" 2>/dev/null || true
   done < <(jq -r '.services | keys[]' <<< "$compose_json")
+}
+
+## orchestrateEnvDown: stop the project's containers and clean up per-project
+## dnsmasq A-records. The default network is never deleted (D-2.1 option a —
+## command-reference.md preserves default/system networks).
+##
+## Reuses orchestrateSvcDown for the stop loop — DOCKER_COMPOSE_ARGS /
+## WARDEN_ENV_PATH / WARDEN_ENV_NAME are already scoped to the project when
+## called from env.cmd, so the right containers are stopped without duplicating
+## the render→stop logic.
+## ponytail: calls orchestrateSvcDown in project scope; factor stopComposeServices
+##   only if svc/env stop paths diverge in future behaviour.
+##
+## Deps (set by env.cmd): DOCKER_COMPOSE_ARGS, WARDEN_ENV_PATH, WARDEN_ENV_NAME,
+##   WARDEN_HOME_DIR.
+function orchestrateEnvDown {
+  orchestrateSvcDown
+
+  local hosts_file="${WARDEN_HOME_DIR}/dnsmasq.d/${WARDEN_ENV_NAME}.hosts"
+  rm -f "${hosts_file}"
+  reloadDnsmasq
 }
