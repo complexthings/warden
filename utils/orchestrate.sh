@@ -5,12 +5,23 @@
 WARDEN_POLL_INTERVAL_S="${WARDEN_POLL_INTERVAL_S:-2}"
 WARDEN_POLL_MAX_RETRIES="${WARDEN_POLL_MAX_RETRIES:-30}"
 
+## resolveContainerName: the name a service's container runs under —
+## its `container_name` if set, else `<WARDEN_ENV_NAME>-<svc>`. Single source of
+## truth shared by run (translateService), readiness (orchestrateEnvUp) and stop
+## (orchestrateSvcDown) so the three paths cannot drift.
+function resolveContainerName {
+  local compose_json="$1" svc="$2" cn
+  cn="$(jq -r --arg svc "$svc" '.services[$svc].container_name // empty' <<< "$compose_json")"
+  echo "${cn:-${WARDEN_ENV_NAME}-${svc}}"
+}
+
 ## translateService: given resolved-config JSON and a service name, build and
 ## execute a `container run` invocation.
 ##
 ## Field mapping (PRD-1 table):
 ##   image        → positional image arg (required; fatal if absent)
-##   service name → --name "${WARDEN_ENV_NAME}-<name>"
+##   name         → --name from resolveContainerName: the service's container_name
+##                  if set, else "${WARDEN_ENV_NAME}-<name>"
 ##   environment  → repeated -e KEY=VAL (handles both list and map forms)
 ##   volumes      → -v src:dst (object form: source:target; string form: strip :cached)
 ##   command/entrypoint → appended after image if present
@@ -28,7 +39,7 @@ function translateService {
     fatal "service '${svc}': missing required 'image' field"
   fi
 
-  local argv=(--name "${WARDEN_ENV_NAME}-${svc}")
+  local argv=(--name "$(resolveContainerName "$compose_json" "$svc")")
 
   # environment: handle both list form ["KEY=VAL"] and map form {KEY: VAL}
   # ponytail: single jq pass covers both forms via type check
@@ -190,7 +201,7 @@ function waitForRunning {
 ## JSON via docker compose config, pre-create named volumes, then translate+run each
 ## service in topological order, waiting for each to reach running state.
 ##
-## Deps (must be in scope when called from env.cmd):
+## Deps (must be in scope when called from env.cmd or svc.cmd):
 ##   DOCKER_COMPOSE_ARGS  — assembled -f <file> array
 ##   WARDEN_ENV_PATH      — project root
 ##   WARDEN_ENV_NAME      — compose project name
@@ -216,6 +227,33 @@ function orchestrateEnvUp {
   while IFS= read -r svc; do
     [[ -z "$svc" ]] && continue
     translateService "$compose_json" "$svc"
-    waitForRunning "${WARDEN_ENV_NAME}-${svc}"
+    waitForRunning "$(resolveContainerName "$compose_json" "$svc")"
   done < <(topoSortServices "$compose_json")
+}
+
+## orchestrateSvcDown: stop exactly the services `svc up` started. Enumerates from
+## the SAME rendered compose config orchestrateEnvUp uses, so dnsmasq (always present)
+## and any optional services (portainer, phpmyadmin) are covered automatically and the
+## up/down paths cannot drift. No network deletion — the default network cannot be
+## deleted (D-2.1 option a; command-reference.md preserves default/system networks).
+##
+## Deps (set by svc.cmd): DOCKER_COMPOSE_ARGS, WARDEN_ENV_PATH, WARDEN_ENV_NAME.
+function orchestrateSvcDown {
+  local compose_json
+  if ! compose_json="$(docker compose \
+      --project-directory "${WARDEN_ENV_PATH}" -p "${WARDEN_ENV_NAME}" \
+      "${DOCKER_COMPOSE_ARGS[@]}" config --format json)"; then
+    fatal "compose config failed — verify compose partials and environment variables"
+  fi
+  if [[ -z "${compose_json}" ]]; then
+    fatal "compose config returned empty output"
+  fi
+
+  local svc name
+  while IFS= read -r svc; do
+    [[ -z "$svc" ]] && continue
+    name="$(resolveContainerName "$compose_json" "$svc")"
+    >&2 echo "[warden] container stop ${name}"
+    container stop "${name}" 2>/dev/null || true
+  done < <(jq -r '.services | keys[]' <<< "$compose_json")
 }

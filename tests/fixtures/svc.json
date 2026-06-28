@@ -1,0 +1,29 @@
+{
+  "services": {
+    "mailpit": {
+      "container_name": "mailhog",
+      "image": "axllent/mailpit:latest"
+    },
+    "traefik": {
+      "container_name": "traefik",
+      "image": "traefik:3.6"
+    },
+    "tunnel": {
+      "container_name": "tunnel",
+      "image": "panubo/sshd:latest",
+      "volumes": [
+        {"type": "volume", "source": "sshd_keys", "target": "/etc/ssh/keys"}
+      ]
+    },
+    "dnsmasq": {
+      "image": "docker.io/wardenenv/dnsmasq:latest"
+    },
+    "phpmyadmin": {
+      "image": "phpmyadmin:latest"
+    }
+  },
+  "volumes": {
+    "sshd_keys": {},
+    "mailpitdata": {}
+  }
+}
