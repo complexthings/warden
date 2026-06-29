@@ -19,6 +19,17 @@ function installSshConfig () {
   fi
 }
 
+function installContainerDns () {
+  [[ "${WARDEN_CONTAINER_RUNTIME:-docker}" != "container" ]] && return 0
+  # ponytail: container system dns ls checked for 'test' word; create only when absent —
+  # re-running install is safe and silent when already configured
+  if container system dns ls 2>/dev/null | grep -qw 'test'; then
+    return 0
+  fi
+  echo "==> Configuring .test DNS resolver (requires sudo privileges)"
+  sudo container system dns create test
+}
+
 function assertWardenInstall {
   if [[ ! -f "${WARDEN_HOME_DIR}/.installed" ]] \
     || [[ "${WARDEN_HOME_DIR}/.installed" -ot "${WARDEN_DIR}/bin/warden" ]]
@@ -39,4 +50,5 @@ function assertWardenInstall {
   #
 
   installSshConfig
+  installContainerDns
 }

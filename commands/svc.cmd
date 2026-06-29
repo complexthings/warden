@@ -42,6 +42,12 @@ if [[ "$WARDEN_DNSMASQ_ENABLE" == "1" ]]; then
     DOCKER_COMPOSE_ARGS+=("${WARDEN_DIR}/docker/docker-compose.dnsmasq.yml")
 fi
 
+# Container runtime: overlay replaces WARDEN_DNSMASQ_CONF (drops .test catch-all; adds addn-hosts mount)
+if [[ "${WARDEN_CONTAINER_RUNTIME:-}" == "container" && "${WARDEN_DNSMASQ_ENABLE}" == "1" ]]; then
+    DOCKER_COMPOSE_ARGS+=("-f")
+    DOCKER_COMPOSE_ARGS+=("${WARDEN_DIR}/docker/docker-compose.dnsmasq.container.yml")
+fi
+
 WARDEN_PORTAINER_ENABLE="${WARDEN_PORTAINER_ENABLE:-0}"
 if [[ "${WARDEN_PORTAINER_ENABLE}" == 1 ]]; then
     DOCKER_COMPOSE_ARGS+=("-f")
@@ -112,6 +118,24 @@ if [[ "${WARDEN_PARAMS[0]}" == "up" ]]; then
         WARDEN_PARAMS=("${WARDEN_PARAMS[@]:1}")
         WARDEN_PARAMS=(up -d "${WARDEN_PARAMS[@]}")
     fi
+fi
+
+## container runtime path — translate + start/stop global services;
+## bypass docker compose invocation and post-start peering loop entirely
+if [[ "${WARDEN_CONTAINER_RUNTIME}" == "container" ]]; then
+    # shellcheck disable=SC1091
+    source "${WARDEN_DIR}/utils/orchestrate.sh"
+    # shellcheck disable=SC2034  # consumed by orchestrate* in the sourced file above
+    WARDEN_ENV_PATH="${WARDEN_HOME_DIR}"
+    # shellcheck disable=SC2034  # consumed by orchestrate* in the sourced file above
+    WARDEN_ENV_NAME="warden"
+    if [[ "${WARDEN_PARAMS[0]}" == "up" ]]; then
+        orchestrateEnvUp
+    elif [[ "${WARDEN_PARAMS[0]}" == "down" ]]; then
+        orchestrateSvcDown
+    fi
+    # ponytail: other svc subcommands (restart, ps, …) not yet ported — PRD-2.x
+    return 0
 fi
 
 ## pass ochestration through to docker compose

@@ -379,10 +379,10 @@ STUB
     run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
         source '${repo_root}/utils/core.sh'
         source '${repo_root}/utils/runtime.sh'
-        assertCommandSupportedForRuntime svc
+        assertCommandSupportedForRuntime shell
     "
     [ "$status" -ne 0 ]
-    [[ "$output" == *"svc"* ]]
+    [[ "$output" == *"shell"* ]]
 }
 
 @test "assertCommandSupportedForRuntime (docker): any command passes silently" {
@@ -426,4 +426,106 @@ STUB
     [ "$status" -eq 0 ]
     [[ "$output" == *"container"* ]]
     [[ "$output" == *"apple/container"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# PRD-2.1 — svc de-guard + DNS host step
+# ---------------------------------------------------------------------------
+
+@test "assertCommandSupportedForRuntime (container): svc passes the guard after porting" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    run env WARDEN_DIR="${repo_root}" WARDEN_CONTAINER_RUNTIME="container" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/runtime.sh'
+        assertCommandSupportedForRuntime svc
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "installContainerDns (container): calls container system dns create test when resolver absent" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    call_log="${fake_bin}/dns.log"
+
+    cat > "${fake_bin}/container" <<STUB
+#!/bin/sh
+echo "\$*" >> "${call_log}"
+if [ "\$1" = "system" ] && [ "\$2" = "dns" ] && [ "\$3" = "ls" ]; then
+    echo "No DNS resolvers configured"
+    exit 0
+fi
+exit 0
+STUB
+    chmod +x "${fake_bin}/container"
+
+    run env WARDEN_DIR="${repo_root}" \
+        WARDEN_CONTAINER_RUNTIME="container" \
+        PATH="${fake_bin}:${PATH}" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/install.sh'
+        function sudo { \"\$@\"; }
+        installContainerDns
+    "
+    dns_calls="$(grep -c 'system dns create test' "${call_log}" 2>/dev/null; true)"; dns_calls="${dns_calls:-0}"
+    rm -rf "${fake_bin}"
+
+    [ "$status" -eq 0 ]
+    [ "${dns_calls}" -eq 1 ]
+}
+
+@test "installContainerDns (container): skips dns create when resolver already configured" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    call_log="${fake_bin}/dns.log"
+
+    cat > "${fake_bin}/container" <<STUB
+#!/bin/sh
+echo "\$*" >> "${call_log}"
+if [ "\$1" = "system" ] && [ "\$2" = "dns" ] && [ "\$3" = "ls" ]; then
+    echo "test    127.0.0.1"
+    exit 0
+fi
+exit 0
+STUB
+    chmod +x "${fake_bin}/container"
+
+    run env WARDEN_DIR="${repo_root}" \
+        WARDEN_CONTAINER_RUNTIME="container" \
+        PATH="${fake_bin}:${PATH}" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/install.sh'
+        function sudo { \"\$@\"; }
+        installContainerDns
+    "
+    dns_calls="$(grep -c 'system dns create test' "${call_log}" 2>/dev/null; true)"; dns_calls="${dns_calls:-0}"
+    rm -rf "${fake_bin}"
+
+    [ "$status" -eq 0 ]
+    [ "${dns_calls}" -eq 0 ]
+}
+
+@test "installContainerDns (docker): does not call container system dns create" {
+    repo_root="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    fake_bin="$(mktemp -d)"
+    call_log="${fake_bin}/dns.log"
+
+    cat > "${fake_bin}/container" <<STUB
+#!/bin/sh
+echo "\$*" >> "${call_log}"
+exit 0
+STUB
+    chmod +x "${fake_bin}/container"
+
+    run env WARDEN_DIR="${repo_root}" \
+        WARDEN_CONTAINER_RUNTIME="docker" \
+        PATH="${fake_bin}:${PATH}" bash -c "
+        source '${repo_root}/utils/core.sh'
+        source '${repo_root}/utils/install.sh'
+        installContainerDns
+    "
+    dns_calls="$(grep -c 'system dns create test' "${call_log}" 2>/dev/null; true)"; dns_calls="${dns_calls:-0}"
+    rm -rf "${fake_bin}"
+
+    [ "$status" -eq 0 ]
+    [ "${dns_calls}" -eq 0 ]
 }
